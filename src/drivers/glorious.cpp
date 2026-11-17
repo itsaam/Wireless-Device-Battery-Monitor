@@ -99,12 +99,13 @@ const wchar_t* HitscanName(USHORT pid) {
 bool HitscanCable(USHORT pid) { return pid == 0x0136 || pid == 0x0194; }
 
 const wchar_t* WLMouseName(USHORT) { return L"WLMouse Beast X Pro"; }
+bool WLMouseCable(USHORT) { return false; }
 
 const Vendor kVendors[] = {
     { 0x258A, L"glorious:", 50, GloriousName, GloriousCable },
     { 0x3770, L"hitscan:", 200, HitscanName, HitscanCable },
     { 0x33E4, L"gwolves:", 100, GWolvesModelName, GWolvesIsCable },
-    { 0x36A7, L"wlmouse:", 100, WLMouseName, nullptr },
+    { 0x36A7, L"wlmouse:", 100, WLMouseName, WLMouseCable },
 };
 
 }  // namespace
@@ -127,7 +128,8 @@ void PollGlorious(PollContext& ctx) {
                     w[3] = 0x02; w[4] = 0x02; w[6] = 0x83;
                     if (!d.SetFeature(w)) break;
                     Sleep(v.replyDelayMs);
-                    if (!d.GetFeature(0, r) || r.size() < 9 || r[6] != 0x83 || (r[1] & 0xF0) != 0xA0) {
+                    if (!d.GetFeature(0, r) || r.size() < 9 || r[6] != 0x83 || (r[1] & 0xF0) != 0xA0 ||
+                        (wlmouse && (r[3] != 0x02 || r[5] != 0x00))) {
                         if (wlmouse) continue;  // a previous command may have left a stale reply
                         break;
                     }
@@ -152,8 +154,8 @@ void PollGlorious(PollContext& ctx) {
                     if (s.name.empty()) s.name = L"Wireless device";
                     s.kind = SinowealthKind(ctx.colls, vid, pid, s.name);
                 }
-                s.via = v.isCable && v.isCable(pid) ? L"USB cable" : L"2.4 GHz receiver";
-                s.charging = (v.isCable && v.isCable(pid)) || r[7] == 0x01;
+                s.via = v.isCable(pid) ? L"USB cable" : L"2.4 GHz receiver";
+                s.charging = v.isCable(pid) || r[7] == 0x01;
                 if (r[1] == 0xA1 && r[8] <= 100) s.percent = Clamp100(r[8] ? r[8] : 1);
                 else s.asleep = true;
                 ctx.Add(s, vid, pid);

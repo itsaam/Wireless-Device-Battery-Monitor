@@ -49,7 +49,7 @@ int Clamp100(int v) { return v < 0 ? 0 : v > 100 ? 100 : v; }
 int main() {
     PollContext ctx;
     ctx.colls = { Collection(0xA870, 0xFF00), Collection(0xA870), Collection(0xA871), Collection(0xA882) };
-    replies = { { 0, 0xA1, 0, 0, 2, 0, 0x83, 0, 42 } };
+    replies = { { 0, 0xA1, 0, 2, 2, 0, 0x83, 0, 42 } };
     PollGlorious(ctx);
     assert(opens == 1 && ctx.out.size() == 1);
     assert(ctx.out[0].key == L"wlmouse:A870" && ctx.out[0].name == L"WLMouse Beast X Pro");
@@ -59,34 +59,34 @@ int main() {
 
     ctx = {};
     ctx.colls = { Collection(0xA870) };
-    replies = { { 0, 0xA4, 0, 0, 2, 0, 0x83, 0, 42 } };
+    replies = { { 0, 0xA4, 0, 2, 2, 0, 0x83, 0, 42 } };
     PollGlorious(ctx);
     assert(ctx.out.size() == 1 && ctx.out[0].asleep && ctx.out[0].percent == -1);
 
     ctx = {};
     ctx.colls = { Collection(0xA870) };
-    replies = { { 0, 0xA1, 0, 0, 2, 0, 0, 0, 42 } };
+    replies = { { 0, 0xA1, 0, 2, 2, 0, 0, 0, 42 } };
     PollGlorious(ctx);
     assert(ctx.out.empty() && !ctx.IsClaimed(0x36A7, 0xA870));
 
     ctx = {};
     ctx.colls = { Collection(0xA870) };
-    replies = { { 0, 0xA0, 0, 0, 2, 0, 0x83, 0, 0 },
-                { 0, 0xA1, 0, 0, 2, 0, 0, 0, 0 },
-                { 0, 0xA1, 0, 0, 2, 0, 0x83, 0, 37 } };
+    replies = { { 0, 0xA0, 0, 2, 2, 0, 0x83, 0, 0 },
+                { 0, 0xA1, 0, 2, 2, 1, 0x83, 0, 99 },
+                { 0, 0xA1, 0, 2, 2, 0, 0x83, 0, 37 } };
     PollGlorious(ctx);
     assert(ctx.out.size() == 1 && ctx.out[0].percent == 37 && !ctx.out[0].asleep);
 
     ctx = {};
     ctx.colls = { Collection(0xA870) };
-    replies = { { 0, 0xA3, 0, 0, 2, 0, 0x83, 0, 0 },
-                { 0, 0xA1, 0, 0, 2, 0, 0x83, 0, 36 } };
+    replies = { { 0, 0xA3, 0, 2, 2, 0, 0x83, 0, 0 },
+                { 0, 0xA1, 0, 2, 2, 0, 0x83, 0, 36 } };
     PollGlorious(ctx);
     assert(ctx.out.size() == 1 && ctx.out[0].percent == 36);
 
     ctx = {};
     ctx.colls = { Collection(0xA870) };
-    replies = { { 0, 0xA2, 0, 0, 2, 0, 0x83, 0, 0 } };
+    replies = { { 0, 0xA2, 0, 2, 2, 0, 0x83, 0, 0 } };
     PollGlorious(ctx);
     assert(ctx.out.empty() && !ctx.IsClaimed(0x36A7, 0xA870));
     std::puts("WLMouse Beast X Pro driver tests passed.");
