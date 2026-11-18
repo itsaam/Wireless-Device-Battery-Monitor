@@ -5,6 +5,17 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Fork release version (without v), e.g. 1.0.6-itsaam.1'
+        required: true
+        default: '1.0.6-itsaam.1'
+        type: string
+
+concurrency:
+  group: build-${{ github.event.inputs.version || github.ref }}
+  cancel-in-progress: false
 
 # Read-only by default: builds of pull requests cannot change the repository or releases.
 permissions:
@@ -14,8 +25,19 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
+      - name: Validate release version
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Publish first itsaam Windows release' && '1.0.6-itsaam.1') || '' }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Dispatch releases from main only.' }
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+-itsaam\.\d+$') { throw 'Expected version such as 1.0.6-itsaam.1' }
+
       # Actions are pinned to exact commits so a moved tag cannot swap in different code.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
@@ -30,14 +52,22 @@ jobs:
         shell: msys2 {0}
         run: make test
 
+      - name: Test official WLMouse driver
+        shell: msys2 {0}
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror tests/wlmouse_driver_test.cpp src/drivers/wlmouse.cpp -o build/wlmouse_driver_test.exe
+          ./build/wlmouse_driver_test.exe
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
       - name: Build installer and portable zip
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Publish first itsaam Windows release' && '1.0.6-itsaam.1') || '' }}
         run: |
-          $version = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.0.0' }
+          $version = if ($env:RELEASE_VERSION) { $env:RELEASE_VERSION } elseif ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.0.0' }
           ./installer/build-installer.ps1 -Version $version
 
       - name: Fetch HeadsetControl source (GPL corresponding source for the bundled binary)
@@ -46,15 +76,31 @@ jobs:
           Invoke-WebRequest https://github.com/Sapd/HeadsetControl/releases/download/4.3.0/headsetcontrol-4.3.0.tar.gz -OutFile dist/headsetcontrol-4.3.0.tar.gz
           if ((Get-FileHash dist/headsetcontrol-4.3.0.tar.gz -Algorithm SHA256).Hash -ne '918dcacf8aef347744b36b2d259d76880fa64b3869f0f8ef26b6576b873d28a7') { throw 'checksum mismatch' }
 
+      - name: Stage executable, provenance and checksums
+        shell: pwsh
+        run: |
+          Copy-Item WirelessBattery.exe, LICENSE, installer/THIRD_PARTY_NOTICES.txt dist/
+          [ordered]@{
+            repository = $env:GITHUB_REPOSITORY
+            commit = $env:GITHUB_SHA
+            workflow_run = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            platform = 'Windows x64'
+            wlmouse_source = 'krisgfx9/Wireless-Device-Battery-Monitor@99c55b211bc9ab1d40e9c863c74f59480e0039b6'
+          } | ConvertTo-Json | Set-Content dist/build-info.json -Encoding utf8
+          Get-ChildItem dist -File | Where-Object Name -ne SHA256SUMS.txt | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS.txt -Encoding ascii
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: WirelessBattery
           path: dist/*
 
-  # Only this job can publish, and only for version tags pushed by the maintainer.
+  # Publish only on version tags, explicit dispatch, or the first-release bootstrap commit.
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Publish first itsaam Windows release')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -63,6 +109,41 @@ jobs:
         with:
           name: WirelessBattery
           path: dist
+      - name: Verify downloaded artifact checksums
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Refuse to replace an existing manually requested release tag
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: v${{ inputs.version || '1.0.6-itsaam.1' }}
+        run: |
+          set -euo pipefail
+          # A successful list avoids treating an authentication/network failure as absence.
+          gh api "repos/$GH_REPO/git/matching-refs/tags/$RELEASE_TAG" > refs.json
+          if jq -e --arg ref "refs/tags/$RELEASE_TAG" 'any(.[]; .ref == $ref)' refs.json; then
+            echo 'Tag already exists; choose a new fork release version.' >&2
+            exit 1
+          fi
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/*
+          fail_on_unmatched_files: true
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.version || '1.0.6-itsaam.1') }}
+          target_commitish: ${{ github.sha }}
+          name: itsaam fork — ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version || '1.0.6-itsaam.1' }}
+          body: |
+            Windows x64 binaries compiled from this fork at `${{ github.sha }}`.
+            Includes the official WLMouse driver from upstream v1.0.6 (not a full upstream v1.0.6 synchronization).
+            Upstream project and credits: https://github.com/krisgfx9/Wireless-Device-Battery-Monitor
+
+            - `WirelessBattery.exe`: standalone executable (extra headset support requires HeadsetControl).
+            - `WirelessBattery-*-portable.zip`: recommended portable bundle with HeadsetControl and license notices.
+            - `WirelessBattery-Setup-*.exe`: installer.
+            - `SHA256SUMS.txt` and `build-info.json`: checksums and exact build provenance.
+            - HeadsetControl corresponding source is included; this application's source is attached by GitHub and available at this release tag under GPL-3.0.
+
+            Build and mock protocol tests passed before publication. Physical mouse behavior is not verified by CI.
+            Unsigned Windows binaries may show a SmartScreen warning.
+            To rebuild after edits, run the build workflow on main with a new unique itsaam version.
