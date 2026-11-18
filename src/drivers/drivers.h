@@ -47,6 +47,7 @@ void PollAula(PollContext& ctx);      // AULA F75 / F87 Pro / F99 wireless keybo
 void PollAtkSerial(PollContext& ctx); // ATK N9 Pro headset (virtual COM port)
 void PollKeychron(PollContext& ctx);  // Keychron mice
 void PollLamzu(PollContext& ctx);     // LAMZU mice on vendor ids 373E / 37B0
+void PollWlmouse(PollContext& ctx); // WLMouse Beast X family (VID 36A7)
 void PollRongyuan(PollContext& ctx);  // Rongyuan receivers (Attack Shark, Ajazz keyboards, ...)
 void PollSonyInzone(PollContext& ctx);  // Sony INZONE H9 II / H5
 void PollRog(PollContext& ctx);       // ASUS ROG keyboards and mice
